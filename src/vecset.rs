@@ -1,5 +1,6 @@
 use std::borrow::Borrow;
 
+#[derive(Eq, PartialEq, Ord, PartialOrd, Copy, Clone, Hash)]
 pub enum Order {
     /// The set is always Sorted.
     Sorted,
@@ -19,6 +20,12 @@ impl <T> VecSet<T, {Order::Sorted}> {
         Self { inner: Vec::new() }
     }
 
+    /// Returns the Order of the set.
+    #[inline]
+    pub fn order(&self) -> Order {
+        Order::Sorted
+    }
+
     /// Returns true if the set contains `item`, false otherwise.
     /// # Examples
     /// ```
@@ -30,6 +37,7 @@ impl <T> VecSet<T, {Order::Sorted}> {
     /// set.push(String::from("world"));
     /// assert!(set.contains("hello"));
     /// ```
+    #[inline]
     pub fn contains<Q: ?Sized>(&self, item: &Q) -> bool
     where
         T: Borrow<Q>,
@@ -42,11 +50,13 @@ impl <T> VecSet<T, {Order::Sorted}> {
     }
 
     /// Pops the last item of the set.
+    #[inline]
     pub fn pop(&mut self) -> Option<T> {
         self.inner.pop()
     }
 
     /// Converts the set into an Unsorted Set.
+    #[inline]
     pub fn into_unsorted(self) -> VecSet<T, {Order::Unsorted}> {
         VecSet::<T, {Order::Unsorted}> {
             inner: self.inner
@@ -57,6 +67,7 @@ impl <T> VecSet<T, {Order::Sorted}> {
 impl <T: Ord> VecSet<T, {Order::Sorted}> {
     /// Pushes `item` into the set.
     /// Returns `true` if the item was already in the set, `false` otherwise.
+    #[inline]
     pub fn push(&mut self, item: T) -> bool {
         match self.inner.binary_search(&item) {
             Ok(_) => {
@@ -81,7 +92,14 @@ impl <T> VecSet<T, {Order::Unsorted}> {
         Self { inner: Vec::new() }
     }
 
+    /// Returns the Order of the set.
+    #[inline]
+    pub fn order(&self) -> Order {
+        Order::Unsorted
+    }
+
     /// Pushes `item` into the set.
+    #[inline]
     pub fn push(&mut self, item: T) {
         self.inner.push(item)
     }
@@ -97,6 +115,7 @@ impl <T> VecSet<T, {Order::Unsorted}> {
     /// set.push(String::from("world"));
     /// assert!(set.contains("hello"));
     /// ```
+    #[inline]
     pub fn contains<Q: ?Sized>(&self, item: &Q) -> bool
     where
         T: Borrow<Q>,
@@ -106,8 +125,21 @@ impl <T> VecSet<T, {Order::Unsorted}> {
     }
 
     /// Pops the last item of the set.
+    #[inline]
     pub fn pop(&mut self) -> Option<T> {
         self.inner.pop()
+    }
+}
+
+impl <T: Ord> VecSet<T, {Order::Unsorted}> {
+    /// Converts the set into a Sorted set.
+    #[inline]
+    pub fn into_sorted(mut self) -> VecSet<T, {Order::Sorted}> {
+        self.inner.sort();
+
+        VecSet::<T, {Order::Sorted}> {
+            inner: self.inner
+        }
     }
 }
 
@@ -139,5 +171,8 @@ mod tests {
         assert_eq!(set.pop(), Some(22));
         assert_eq!(set.pop(), Some(10));
         assert_eq!(set.pop(), Some(5));
+
+        let unordered = set.into_unsorted();
+        assert!(unordered.order() == Order::Unsorted);
     }
 }
