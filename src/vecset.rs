@@ -15,13 +15,28 @@ pub struct VecSet<T, const ORDER: Order> {
     inner: Vec<T>,
 }
 
-impl<T> VecSet<T, { Order::Sorted }> {
-    /// Returns the Order of the set.
-    #[inline]
-    pub fn order(&self) -> Order {
-        Order::Sorted
+impl <T, const ORDER: Order> VecSet<T, { ORDER }> {
+    /// Returns the [`Order`] of the set.
+    #[inline(always)]
+    pub const fn order(&self) -> Order {
+        ORDER
     }
 
+    /// Pops an item from the set
+    #[inline(always)]
+    pub fn pop(&mut self) -> Option<T> {
+        self.inner.pop()
+    }
+
+    /// Returns an iterator over the set.
+    #[inline(always)]
+    pub fn iter(&self) -> Iter<T> {
+        self.inner.iter()
+    }
+}
+
+
+impl<T> VecSet<T, { Order::Sorted }> {
     /// Returns true if the set contains `item`, false otherwise.
     /// # Examples
     /// ```
@@ -72,11 +87,6 @@ impl<T: Ord> VecSet<T, { Order::Sorted }> {
 }
 
 impl<T> VecSet<T, { Order::Unsorted }> {
-    /// Returns the Order of the set.
-    #[inline]
-    pub fn order(&self) -> Order {
-        Order::Unsorted
-    }
 
     /// Pushes `item` into the set.
     #[inline]
@@ -142,30 +152,9 @@ impl_vecset!(
     pub fn new() -> Self {
         Self { inner: Vec::new() }
     }
-
-    /// Pops the last item of the set.
-    #[inline(always)]
-    pub fn pop(&mut self) -> Option<T> {
-        self.inner.pop()
-    }
-
-    /// Returns an iterator over the set.
-    #[inline(always)]
-    pub fn iter(&self) -> Iter<T> {
-        self.inner.iter()
-    }
 );
 
-impl<T> Deref for VecSet<T, { Order::Sorted }> {
-    type Target = [T];
-
-    #[inline(always)]
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl<T> Deref for VecSet<T, { Order::Unsorted }> {
+impl<T, const ORDER: Order> Deref for VecSet<T, { ORDER }> {
     type Target = [T];
 
     #[inline(always)]
@@ -211,7 +200,9 @@ mod tests {
         assert_eq!(set.pop(), Some(10));
         assert_eq!(set.pop(), Some(5));
 
-        let unordered = set.into_unsorted();
+        let mut unordered = set.into_unsorted();
         assert!(unordered.order() == Order::Unsorted);
+
+        let x: &[i32] = unordered.deref_mut();
     }
 }
