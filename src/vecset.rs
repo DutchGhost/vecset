@@ -33,6 +33,12 @@ impl <T, const ORDER: Order> VecSet<T, { ORDER }> {
     pub fn iter(&self) -> Iter<T> {
         self.inner.iter()
     }
+
+    /// Returns a slice over the set
+    #[inline(always)]
+    pub fn as_slice(&self) -> &[T] {
+        &self.inner
+    }
 }
 
 
@@ -158,7 +164,7 @@ impl<T, const ORDER: Order> Deref for VecSet<T, { ORDER }> {
     type Target = [T];
 
     #[inline(always)]
-    fn deref(&self) -> &Self::Target {
+    fn deref(&self) -> &[T] {
         &self.inner
     }
 }
@@ -203,6 +209,6 @@ mod tests {
         let mut unordered = set.into_unsorted();
         assert!(unordered.order() == Order::Unsorted);
 
-        let x: &[i32] = unordered.deref_mut();
+        let x: &[i32] = unordered.as_slice();
     }
 }
