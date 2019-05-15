@@ -1,4 +1,6 @@
 use std::borrow::Borrow;
+use std::ops::{Deref, DerefMut};
+use std::slice::{Iter, IterMut};
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Copy, Clone, Hash)]
 pub enum Order {
@@ -6,20 +8,14 @@ pub enum Order {
     Sorted,
 
     /// No order constraint.
-    Unsorted
+    Unsorted,
 }
 
 pub struct VecSet<T, const ORDER: Order> {
     inner: Vec<T>,
 }
 
-impl <T> VecSet<T, {Order::Sorted}> {
-    /// Creates a new Sorted VecSet.
-    #[inline(always)]
-    pub fn new() -> Self {
-        Self { inner: Vec::new() }
-    }
-
+impl<T> VecSet<T, { Order::Sorted }> {
     /// Returns the Order of the set.
     #[inline]
     pub fn order(&self) -> Order {
@@ -49,30 +45,20 @@ impl <T> VecSet<T, {Order::Sorted}> {
         }
     }
 
-    /// Pops the last item of the set.
-    #[inline]
-    pub fn pop(&mut self) -> Option<T> {
-        self.inner.pop()
-    }
-
     /// Converts the set into an Unsorted Set.
     #[inline]
-    pub fn into_unsorted(self) -> VecSet<T, {Order::Unsorted}> {
-        VecSet::<T, {Order::Unsorted}> {
-            inner: self.inner
-        }
+    pub fn into_unsorted(self) -> VecSet<T, { Order::Unsorted }> {
+        VecSet::<T, { Order::Unsorted }> { inner: self.inner }
     }
 }
 
-impl <T: Ord> VecSet<T, {Order::Sorted}> {
+impl<T: Ord> VecSet<T, { Order::Sorted }> {
     /// Pushes `item` into the set.
     /// Returns `true` if the item was already in the set, `false` otherwise.
     #[inline]
     pub fn push(&mut self, item: T) -> bool {
         match self.inner.binary_search(&item) {
-            Ok(_) => {
-                true
-            }
+            Ok(_) => true,
             Err(idx) => {
                 if idx > self.inner.len() {
                     self.inner.push(item);
@@ -85,13 +71,7 @@ impl <T: Ord> VecSet<T, {Order::Sorted}> {
     }
 }
 
-impl <T> VecSet<T, {Order::Unsorted}> {
-    /// Creates a new Unsorted VecSet.
-    #[inline(always)]
-    pub fn new() -> Self {
-        Self { inner: Vec::new() }
-    }
-
+impl<T> VecSet<T, { Order::Unsorted }> {
     /// Returns the Order of the set.
     #[inline]
     pub fn order(&self) -> Order {
@@ -121,25 +101,84 @@ impl <T> VecSet<T, {Order::Unsorted}> {
         T: Borrow<Q>,
         Q: Ord,
     {
-        self.inner.iter().find(|elem| (*elem).borrow() == item).is_some()
+        self.inner
+            .iter()
+            .find(|elem| (*elem).borrow() == item)
+            .is_some()
     }
 
-    /// Pops the last item of the set.
+    /// Returns an iterator that allows modifying each value.
     #[inline]
-    pub fn pop(&mut self) -> Option<T> {
-        self.inner.pop()
+    pub fn iter_mut(&mut self) -> IterMut<T> {
+        self.inner.iter_mut()
     }
 }
 
-impl <T: Ord> VecSet<T, {Order::Unsorted}> {
+impl<T: Ord> VecSet<T, { Order::Unsorted }> {
     /// Converts the set into a Sorted set.
     #[inline]
-    pub fn into_sorted(mut self) -> VecSet<T, {Order::Sorted}> {
+    pub fn into_sorted(mut self) -> VecSet<T, { Order::Sorted }> {
         self.inner.sort();
 
-        VecSet::<T, {Order::Sorted}> {
-            inner: self.inner
+        VecSet::<T, { Order::Sorted }> { inner: self.inner }
+    }
+}
+
+macro_rules! impl_vecset {
+    ($($impls:tt)*) => {
+        impl <T> VecSet<T, {Order::Sorted}> {
+            $($impls)*
         }
+
+        impl <T> VecSet<T, {Order::Unsorted}> {
+            $($impls)*
+        }
+    }
+}
+
+impl_vecset!(
+    /// Creates a new VecSet with the specified order.
+    #[inline(always)]
+    pub fn new() -> Self {
+        Self { inner: Vec::new() }
+    }
+
+    /// Pops the last item of the set.
+    #[inline(always)]
+    pub fn pop(&mut self) -> Option<T> {
+        self.inner.pop()
+    }
+
+    /// Returns an iterator over the set.
+    #[inline(always)]
+    pub fn iter(&self) -> Iter<T> {
+        self.inner.iter()
+    }
+);
+
+impl<T> Deref for VecSet<T, { Order::Sorted }> {
+    type Target = [T];
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<T> Deref for VecSet<T, { Order::Unsorted }> {
+    type Target = [T];
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<T> DerefMut for VecSet<T, { Order::Unsorted }> {
+
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
     }
 }
 
@@ -149,7 +188,7 @@ mod tests {
 
     #[test]
     fn test_unsorted() {
-        let mut set = VecSet::<_, {Order::Unsorted}>::new();
+        let mut set = VecSet::<_, { Order::Unsorted }>::new();
         set.push(String::from("hello"));
         set.push(String::from("world"));
 
@@ -161,7 +200,7 @@ mod tests {
 
     #[test]
     fn test_sorted() {
-        let mut set = VecSet::<_, {Order::Sorted}>::new();
+        let mut set = VecSet::<_, { Order::Sorted }>::new();
         set.push(10);
         set.push(5);
         set.push(22);
