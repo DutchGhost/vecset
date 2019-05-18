@@ -3,12 +3,25 @@ use std::ops::{Deref, DerefMut};
 use std::slice::{Iter, IterMut};
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Copy, Clone, Hash)]
+#[repr(u8)]
 pub enum Order {
     /// The set is always Sorted.
-    Sorted,
+    Sorted = 0,
 
     /// No order constraint.
-    Unsorted,
+    Unsorted = 1,
+}
+
+impl Order {
+    #[inline(always)]
+    pub const fn is_sorted(&self) -> bool {
+        *self as u8 == Order::Sorted as u8
+    }
+
+    #[inline(always)]
+    pub const fn is_unsorted(&self) -> bool {
+        !self.is_sorted()
+    }
 }
 
 pub struct VecSet<T, const ORDER: Order> {
@@ -39,6 +52,33 @@ impl <T, const ORDER: Order> VecSet<T, { ORDER }> {
     pub fn as_slice(&self) -> &[T] {
         &self.inner
     }
+
+    /// Converts the set into an Unsorted Set.
+    #[inline]
+    pub fn into_unsorted(self) -> VecSet<T, { Order::Unsorted}> {
+        VecSet::<T, { Order::Unsorted }> { inner: self.inner }
+    }
+    
+    /// Converts the set into a Sorted set.
+    #[inline]
+    pub fn into_sorted(self) -> VecSet<T, { Order::Sorted }>
+    where
+        T: Ord
+    {
+        // We need T: Ord here,
+        // if the Order is Sorted already,
+        // this bound is required anyway by most methods,
+        // and if the order is Unsorted, we need to sort the inner vector,
+        // which requires T: Ord.
+        let mut inner = self.inner;
+
+        if ORDER.is_sorted() {
+            VecSet::<T, { Order::Sorted }> { inner }
+        } else {
+            inner.sort();
+            VecSet::<T, { Order::Sorted }> { inner }
+        }
+    }
 }
 
 
@@ -64,12 +104,6 @@ impl<T> VecSet<T, { Order::Sorted }> {
             Ok(_) => true,
             Err(_) => false,
         }
-    }
-
-    /// Converts the set into an Unsorted Set.
-    #[inline]
-    pub fn into_unsorted(self) -> VecSet<T, { Order::Unsorted }> {
-        VecSet::<T, { Order::Unsorted }> { inner: self.inner }
     }
 }
 
@@ -127,16 +161,6 @@ impl<T> VecSet<T, { Order::Unsorted }> {
     #[inline]
     pub fn iter_mut(&mut self) -> IterMut<T> {
         self.inner.iter_mut()
-    }
-}
-
-impl<T: Ord> VecSet<T, { Order::Unsorted }> {
-    /// Converts the set into a Sorted set.
-    #[inline]
-    pub fn into_sorted(mut self) -> VecSet<T, { Order::Sorted }> {
-        self.inner.sort();
-
-        VecSet::<T, { Order::Sorted }> { inner: self.inner }
     }
 }
 
