@@ -39,6 +39,8 @@ impl Order {
 /// To convert a Sorted set into an Unsorted set, or vice versa,
 /// use the [`VecSet::into_sorted`] and [`VecSet::into_unsorted`] methods.
 ///
+/// Items in a Sorted set can not be mutated, as that mutations change their order.
+/// To mutate the items, use the [`VecSet::mutate_in_place`] method.
 /// # Examples
 /// ```
 /// #![feature(const_generics)]
@@ -128,6 +130,27 @@ impl <T, const ORDER: Order> VecSet<T, { ORDER }> {
         }
     }
 
+    /// Returns true if the set contains `item`, false otherwise.
+    /// # Examples
+    /// ```
+    /// #![feature(const_generics)]
+    /// use vecset::vecset::{Order, VecSet};
+    ///
+    /// let mut set = VecSet::<_, { Order::Sorted}>::default();
+    /// set.push(String::from("hello"));
+    /// set.push(String::from("world"));
+    /// assert!(set.contains("hello"));
+    /// ```
+    #[inline]
+    pub fn contains<Q: ?Sized>(&self, item: &Q) -> bool
+    where
+        Self: Search<T>,
+        T: Borrow<Q>,
+        Q: Ord,
+    {
+        self.search(item).is_ok()
+    }
+
     /// Gets the given items entry in the map for in-place manipulations.
     /// # Examples
     /// ```
@@ -205,6 +228,16 @@ impl <T, const ORDER: Order> VecSet<T, { ORDER }> {
         R: RangeBounds<usize>
     {
         self.inner.drain(range)
+    }
+
+    /// Retains the elements specified by the predicate.
+    /// In other words, remove all elements that `f(&e)` returns false.
+    #[inline]
+    pub fn retain<F>(&mut self, f: F)
+    where
+        F: FnMut(&T) -> bool
+    {
+        self.inner.retain(f)
     }
 }
 
@@ -366,28 +399,6 @@ pub enum Entry<'a, T, const ORDER: Order> {
     Occupied(OccupiedEntry<'a, T, {ORDER}>)
 }
 
-impl<T> VecSet<T, { Order::Sorted }> {
-    /// Returns true if the set contains `item`, false otherwise.
-    /// # Examples
-    /// ```
-    /// #![feature(const_generics)]
-    /// use vecset::vecset::{Order, VecSet};
-    ///
-    /// let mut set = VecSet::<_, { Order::Sorted}>::default();
-    /// set.push(String::from("hello"));
-    /// set.push(String::from("world"));
-    /// assert!(set.contains("hello"));
-    /// ```
-    #[inline]
-    pub fn contains<Q: ?Sized>(&self, item: &Q) -> bool
-    where
-        T: Borrow<Q>,
-        Q: Ord,
-    {
-        self.search(item).is_ok()
-    }
-}
-
 impl<T: Ord> VecSet<T, { Order::Sorted }> {
 
     /// Pushes `item` into the set.
@@ -404,31 +415,27 @@ impl<T: Ord> VecSet<T, { Order::Sorted }> {
     }
 }
 
+impl <T: Ord> VecSet<T, {Order::Sorted}> {
+    
+    /// Runs the closure for each item in the set,
+    /// and resorts the set at the end of the function.
+    pub fn mutate_in_place<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&mut T)
+    {
+        for item in self.inner.iter_mut() {
+            f(item);
+        }
+
+        self.inner.sort();
+    }
+}
+
 impl<T> VecSet<T, { Order::Unsorted }> {
     /// Pushes `item` into the set.
     #[inline]
     pub fn push(&mut self, item: T) {
         self.inner.push(item)
-    }
-
-    /// Returns true if the set contains `item`, false otherwise.
-    /// # Examples
-    /// ```
-    /// #![feature(const_generics)]
-    /// use vecset::vecset::{Order, VecSet};
-    ///
-    /// let mut set = VecSet::<_, { Order::Unsorted}>::default();
-    /// set.push(String::from("hello"));
-    /// set.push(String::from("world"));
-    /// assert!(set.contains("hello"));
-    /// ```
-    #[inline]
-    pub fn contains<Q: ?Sized>(&self, item: &Q) -> bool
-    where
-        T: Borrow<Q>,
-        Q: Ord,
-    {
-        self.search(item).is_ok()
     }
 
     #[inline]
