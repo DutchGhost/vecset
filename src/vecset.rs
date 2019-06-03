@@ -213,7 +213,7 @@ impl <T, const ORDER: Order> VecSet<T, { ORDER }> {
                 self.inner.remove(idx);
                 true
             }
-            Err(idx) => {
+            Err(_) => {
                 false
             }
         }
@@ -417,16 +417,15 @@ impl<T: Ord> VecSet<T, { Order::Sorted }> {
 
 impl <T: Ord> VecSet<T, {Order::Sorted}> {
     
-    /// Runs the closure for each item in the set,
-    /// and resorts the set at the end of the function.
+    /// Gets access to the underlying Vec for the scope of the closure.
+    /// The order and unique item guarantee do not apply within the closure,
+    /// but are restored after the closure
     pub fn mutate_in_place<F>(&mut self, mut f: F)
     where
-        F: FnMut(&mut T)
+        F: FnMut(&mut Vec<T>)
     {
-        for item in self.inner.iter_mut() {
-            f(item);
-        }
-
+        f(&mut self.inner);
+        self.inner.dedup();
         self.inner.sort();
     }
 }
@@ -495,10 +494,10 @@ mod tests {
         assert_eq!(set.pop(), Some(10));
         assert_eq!(set.pop(), Some(5));
 
-        let mut unordered = set.into_unsorted();
+        let unordered = set.into_unsorted();
         assert!(unordered.order() == Order::Unsorted);
 
-        let x: &[i32] = unordered.as_slice();
+        let _: &[i32] = unordered.as_slice();
     }
 
     #[test]
