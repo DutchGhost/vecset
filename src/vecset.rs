@@ -1,32 +1,14 @@
-use std::{
+use super::order::Order;
+use super::search::{Search, SearchResult};
+
+use core::{
     borrow::Borrow,
+    iter::FromIterator,
     ops::{Deref, DerefMut, RangeBounds},
     slice::{Iter, IterMut},
-    iter::FromIterator,
-    vec::{Drain, IntoIter},
 };
 
-#[derive(Eq, PartialEq, Ord, PartialOrd, Copy, Clone, Hash)]
-#[repr(u8)]
-pub enum Order {
-    /// The set is always Sorted.
-    Sorted = 0,
-
-    /// No order constraint.
-    Unsorted = 1,
-}
-
-impl Order {
-    #[inline(always)]
-    pub const fn is_sorted(&self) -> bool {
-        *self as u8 == Order::Sorted as u8
-    }
-
-    #[inline(always)]
-    pub const fn is_unsorted(&self) -> bool {
-        !self.is_sorted()
-    }
-}
+use alloc::vec::{Drain, IntoIter, Vec};
 
 /// A vecset is a set of items.
 /// It is paremeterized with an [`Order`], to denote whether
@@ -45,11 +27,11 @@ impl Order {
 /// ```
 /// #![feature(const_generics)]
 /// use vecset::vecset::{Order, VecSet, Entry};
-/// 
+///
 /// let mut set = (0..10).rev().collect::<VecSet<_, {Order::Sorted}>>();
-/// 
+///
 /// assert!(set.contains(&9));
-/// 
+///
 /// match set.entry(15) {
 ///     Entry::Occupied(entry) => {
 ///         entry.remove();
@@ -58,26 +40,72 @@ impl Order {
 ///         entry.insert();
 ///     }
 /// }
-/// 
+///
 /// assert!(set.remove(&15));
 /// assert!(!set.contains(&15));
-/// 
+///
 /// assert_eq!(set.as_slice, &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
 /// ```
 pub struct VecSet<T, const ORDER: Order> {
     inner: Vec<T>,
 }
 
-impl <T, const ORDER: Order> Default for VecSet<T, { ORDER }> {
+impl<T, const ORDER: Order> Default for VecSet<T, { ORDER }> {
     #[inline(always)]
     fn default() -> Self {
-        VecSet::<T, {ORDER}> {
-            inner: Vec::new()
-        }
+        VecSet::<T, { ORDER }> { inner: Vec::new() }
     }
 }
 
-impl <T, const ORDER: Order> VecSet<T, { ORDER }> {
+/// Private implementations that *could* break
+/// the invariant that a Sorted set is always sorted,
+/// due to returning mutable references to the inners.
+///
+/// # Private
+/// All methods in here are marked private because it is not known whether
+/// `ORDER` is `Sorted`, in which case it is disallowed
+/// to mutate any value within the set.
+///
+/// The public API uses these methods internally, but only exposes
+/// what they see fit.
+#[doc(hidden)]
+impl<T, const ORDER: Order> VecSet<T, { ORDER }> {
+    /// Searches for `item` in the set.
+    /// Returns `Ok` with the corresponding index if the item is found,
+    /// `Err` with the index `item` should be placed at otherwise.
+    #[inline(always)]
+    pub(crate) fn search<Q: ?Sized>(&self, item: &Q) -> SearchResult
+    where
+        T: Borrow<Q>,
+        Q: Ord,
+    {
+        // LLVM *should* constify this.
+        match ORDER {
+            Order::Sorted => self.bin_search(item),
+            Order::Unsorted => self.iter_search(item),
+        }
+    }
+
+    /// Inserts `item` into the set if not present, then returns a reference to the value in the set.
+    pub(crate) fn get_or_insert_priv(&mut self, item: T) -> &mut T
+    where
+        T: Ord,
+    {
+        self.entry(item).insert_priv()
+    }
+
+    /// Inserts the computed value from `f` given `item` is not present, then returns a reference to the value in the set.
+    pub(crate) fn get_or_insert_with_priv<Q: ?Sized, F>(&mut self, item: &Q, f: F) -> &mut T
+    where
+        T: Borrow<Q>,
+        Q: Ord,
+        F: FnOnce(&Q) -> T,
+    {
+        self.entry_with(item, f).insert_priv()
+    }
+}
+
+impl<T, const ORDER: Order> VecSet<T, { ORDER }> {
     /// Returns the [`Order`] of the set.
     #[inline(always)]
     pub const fn order(&self) -> Order {
@@ -104,7 +132,7 @@ impl <T, const ORDER: Order> VecSet<T, { ORDER }> {
 
     /// Converts the set into an Unsorted Set.
     #[inline]
-    pub fn into_unsorted(self) -> VecSet<T, { Order::Unsorted}> {
+    pub fn into_unsorted(self) -> VecSet<T, { Order::Unsorted }> {
         VecSet::<T, { Order::Unsorted }> { inner: self.inner }
     }
 
@@ -112,7 +140,7 @@ impl <T, const ORDER: Order> VecSet<T, { ORDER }> {
     #[inline]
     pub fn into_sorted(self) -> VecSet<T, { Order::Sorted }>
     where
-        T: Ord
+        T: Ord,
     {
         // We need T: Ord here,
         // if the Order is Sorted already,
@@ -144,7 +172,6 @@ impl <T, const ORDER: Order> VecSet<T, { ORDER }> {
     #[inline]
     pub fn contains<Q: ?Sized>(&self, item: &Q) -> bool
     where
-        Self: Search<T>,
         T: Borrow<Q>,
         Q: Ord,
     {
@@ -178,25 +205,41 @@ impl <T, const ORDER: Order> VecSet<T, { ORDER }> {
     /// assert_eq!(slice, &[20, 21, 12]);
     /// ```
     #[inline]
-    pub fn entry(&mut self, item: T) -> Entry<T, {ORDER}>
+    pub fn entry(&mut self, item: T) -> Entry<T, { ORDER }>
     where
-        Self: Search<T>,
         T: Ord,
     {
         match self.search(&item) {
-            Ok(idx) => {
-                Entry::Occupied(OccupiedEntry::<T, {ORDER}> {
-                    set: self,
-                    index: idx,
-                })
-            },
-            Err(idx) => {
-                Entry::Vacant(VacantEntry::<T, {ORDER}> {
-                    entry: item,
-                    set: self,
-                    index: idx
-                })
-            }
+            Ok(idx) => Entry::Occupied(OccupiedEntry::<T, { ORDER }> {
+                set: self,
+                index: idx,
+            }),
+            Err(idx) => Entry::Vacant(VacantEntry::<T, { ORDER }> {
+                entry: item,
+                set: self,
+                index: idx,
+            }),
+        }
+    }
+
+    /// Creates an entry derived from `f` if `item` is not present in the set.
+    pub fn entry_with<Q: ?Sized, F>(&mut self, item: &Q, f: F) -> Entry<T, { ORDER }>
+    where
+        T: Borrow<Q>,
+        Q: Ord,
+        F: FnOnce(&Q) -> T,
+    {
+        match self.search(item) {
+            Ok(idx) => Entry::Occupied(OccupiedEntry::<T, { ORDER }> {
+                set: self,
+                index: idx,
+            }),
+
+            Err(idx) => Entry::Vacant(VacantEntry::<T, { ORDER }> {
+                entry: f(item),
+                set: self,
+                index: idx,
+            }),
         }
     }
 
@@ -204,18 +247,15 @@ impl <T, const ORDER: Order> VecSet<T, { ORDER }> {
     #[inline]
     pub fn remove<Q: ?Sized>(&mut self, item: &Q) -> bool
     where
-        Self: Search<T>,
         T: Borrow<Q>,
-        Q: Ord
+        Q: Ord,
     {
         match self.search(item) {
             Ok(idx) => {
                 self.inner.remove(idx);
                 true
             }
-            Err(_) => {
-                false
-            }
+            Err(_) => false,
         }
     }
 
@@ -225,7 +265,7 @@ impl <T, const ORDER: Order> VecSet<T, { ORDER }> {
     #[inline]
     pub fn drain<R>(&mut self, range: R) -> Drain<T>
     where
-        R: RangeBounds<usize>
+        R: RangeBounds<usize>,
     {
         self.inner.drain(range)
     }
@@ -235,171 +275,29 @@ impl <T, const ORDER: Order> VecSet<T, { ORDER }> {
     #[inline]
     pub fn retain<F>(&mut self, f: F)
     where
-        F: FnMut(&T) -> bool
+        F: FnMut(&T) -> bool,
     {
         self.inner.retain(f)
     }
 }
 
-impl <T: Ord> FromIterator<T> for VecSet<T, {Order::Sorted}> {
-    fn from_iter<I>(iter: I) -> Self
-    where
-        I: IntoIterator<Item = T>
-    {
-
-        let mut set = VecSet::<T, {Order::Sorted}>::default();
-
-        for elem in iter {
-            set.push(elem);
-        }
-
-        set
-    }
-}
-
-impl <T> FromIterator<T> for VecSet<T, {Order::Unsorted}> {
-    fn from_iter<I>(iter: I) -> Self
-    where
-        I: IntoIterator<Item = T>
-    {
-        let mut set = VecSet::<T, {Order::Unsorted}>::default();
-
-        for elem in iter {
-            set.push(elem);
-        }
-
-        set
-    }
-}
-
-impl <T, const ORDER: Order> IntoIterator for VecSet<T, {ORDER}> {
-    type Item = T;
-    type IntoIter = IntoIter<T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.inner.into_iter()
-    }
-}
-
-/// Defines how should be sought in a set.
-/// For an Sorted [`VecSet`], this uses a binary search,
-/// while for an Unsorted [`VecSet`], this uses
-/// an iterator-based search.
-/// (see [`Order`])
-pub trait Search<T> {
-    /// Performs the searching.
-    fn search<Q: ?Sized>(&self, item: &Q) -> Result<usize, usize>
-    where
-        T: Borrow<Q>,
-        Q: Ord;
-}
-
-impl <T> Search<T> for VecSet<T, {Order::Sorted}> {
-    #[inline]
-    fn search<Q: ?Sized>(&self, item: &Q) -> Result<usize, usize>
-    where
-        T: Borrow<Q>,
-        Q: Ord,
-    {
-        self.inner.binary_search_by(|elem| elem.borrow().cmp(item))
-    }
-}
-
-impl <T> Search<T> for VecSet<T, {Order::Unsorted}> {
-    #[inline]
-    fn search<Q: ?Sized>(&self, item: &Q) -> Result<usize, usize>
-    where
-        T: Borrow<Q>,
-        Q: Ord
-    {
-        match self.inner.iter().enumerate().find(|(_, elem)| (*elem).borrow() == item).map(|(idx, _)| idx) {
-            Some(index) => Ok(index),
-            None => Err(self.inner.len())
-        }
-    }
-}
-
-/// A view into a vacant entry in a `VecSet`. It is part of the [`Entry`] enum.
-pub struct VacantEntry<'a, T, const ORDER: Order> {
-    entry: T,
-    index: usize,
-    set: &'a mut VecSet<T, {ORDER}>,
-}
-
-impl <'a, T, const ORDER: Order> VacantEntry<'a, T, {ORDER}> {
-    /// Returns a reference to the `VacantEntry`'s value.
-    #[inline(always)]
-    pub fn get(&self) -> &T {
-        &self.entry
-    }
-}
-
-impl <'a, T> VacantEntry<'a, T, {Order::Sorted}> {
-    /// Set's the value of the entry with the `VacantEntry`'s value,
-    /// returning a reference to it.
-    #[inline]
-    pub fn insert(self) -> &'a T {
-        let index = self.index;
-        let entry = self.entry;
-        self.set.inner.insert(index, entry);
-        &self.set.inner[index]
-    }
-}
-
-impl <'a, T> VacantEntry<'a, T, {Order::Unsorted}> {
-    /// Set's the value of the entry with the `VacantEntry`'s value,
-    /// returning a mutable reference to it.
-    #[inline]
-    pub fn insert(self) -> &'a mut T {
-        let index = self.index;
-        let entry = self.entry;
-        self.set.inner.insert(index, entry);
-        &mut self.set.inner[index]
-    }
-
-    /// Returns a mutable reference to the `VacantEntry`'s value.
-    #[inline(always)]
-    pub fn get_mut(&mut self) -> &mut T {
-        &mut self.entry
-    }
-}
-
-/// A view into an occupied entry in a `VecSet`. It is part of the [`Entry`] enum.
-pub struct OccupiedEntry<'a, T, const ORDER: Order> {
-    set: &'a mut VecSet<T, {ORDER}>,
-    index: usize,
-}
-
-impl <'a, T, const ORDER: Order> OccupiedEntry<'a, T, {ORDER}> {
-    /// Take ownership of the value from the set
-    #[inline(always)]
-    pub fn remove(self) -> T {
-        self.set.inner.remove(self.index)
-    }
-
-    /// Returns a reference to the `OccupiedEntry`'s value.
-    #[inline(always)]
-    pub fn get(&self) -> &T {
-        &self.set.as_slice()[self.index]
-    }
-}
-
-impl <'a, T> OccupiedEntry<'a, T, {Order::Unsorted}> {
-    /// Returns a mutable reference to the `OccupiedEntry`'s value.
-    #[inline(always)]
-    pub fn get_mut(&mut self) -> &mut T {
-        &mut self.set.as_slice_mut()[self.index]
-    }
-}
-
-/// A view into a single entry in a set, which may either be vacant or occupied.
-/// this enum is constructed from the [`VecSet::entry`] method on a [`VecSet`].
-pub enum Entry<'a, T, const ORDER: Order> {
-    Vacant(VacantEntry<'a, T, {ORDER}>),
-    Occupied(OccupiedEntry<'a, T, {ORDER}>)
-}
-
 impl<T: Ord> VecSet<T, { Order::Sorted }> {
+    /// Gets access to the underlying Vec for the scope of the closure.
+    /// The order and unique item guarantee do not apply within the closure,
+    /// but are restored after the closure.
+    pub fn mutate_in_place<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&mut Vec<T>),
+    {
+        f(&mut self.inner);
+        self.inner.dedup();
+        self.inner.sort();
+    }
+
+    /// Inserts `item` into the set if not present, then returns a reference to the value in the set.
+    pub fn get_or_insert(&mut self, item: T) -> &T {
+        self.get_or_insert_priv(item)
+    }
 
     /// Pushes `item` into the set.
     /// Returns `true` if the item was already in the set, `false` otherwise.
@@ -415,18 +313,16 @@ impl<T: Ord> VecSet<T, { Order::Sorted }> {
     }
 }
 
-impl <T: Ord> VecSet<T, {Order::Sorted}> {
-    
-    /// Gets access to the underlying Vec for the scope of the closure.
-    /// The order and unique item guarantee do not apply within the closure,
-    /// but are restored after the closure
-    pub fn mutate_in_place<F>(&mut self, mut f: F)
+impl<T> VecSet<T, { Order::Sorted }> {
+    /// Inserts the computed value from `f` given `item` is not present, then returns a reference to the value in the set.
+    #[inline(always)]
+    pub fn get_or_insert_with<Q: ?Sized, F>(&mut self, item: &Q, f: F) -> &T
     where
-        F: FnMut(&mut Vec<T>)
+        T: Borrow<Q>,
+        Q: Ord,
+        F: FnOnce(&Q) -> T,
     {
-        f(&mut self.inner);
-        self.inner.dedup();
-        self.inner.sort();
+        self.get_or_insert_with_priv(item, f)
     }
 }
 
@@ -437,6 +333,7 @@ impl<T> VecSet<T, { Order::Unsorted }> {
         self.inner.push(item)
     }
 
+    /// Returns the set as a mutable slice.
     #[inline]
     pub fn as_slice_mut(&mut self) -> &mut [T] {
         &mut self.inner
@@ -445,6 +342,27 @@ impl<T> VecSet<T, { Order::Unsorted }> {
     #[inline]
     pub fn iter_mut(&mut self) -> IterMut<T> {
         self.inner.iter_mut()
+    }
+}
+
+impl<T: Ord> VecSet<T, { Order::Unsorted }> {
+    /// Inserts `item` into the set if not present, then returns a reference to the value in the set.
+    #[inline(always)]
+    pub fn get_or_insert(&mut self, item: T) -> &mut T {
+        self.get_or_insert_priv(item)
+    }
+}
+
+impl<T> VecSet<T, { Order::Unsorted }> {
+    /// Inserts the computed value from `f` given `item` is not present, then returns a reference to the value in the set.
+    #[inline]
+    pub fn get_or_insert_with<Q: ?Sized, F>(&mut self, item: &Q, f: F) -> &mut T
+    where
+        T: Borrow<Q>,
+        Q: Ord,
+        F: FnOnce(&Q) -> T,
+    {
+        self.get_or_insert_with_priv(item, f)
     }
 }
 
@@ -458,16 +376,183 @@ impl<T, const ORDER: Order> Deref for VecSet<T, { ORDER }> {
 }
 
 impl<T> DerefMut for VecSet<T, { Order::Unsorted }> {
-
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.inner
     }
 }
 
+impl<T: Ord> FromIterator<T> for VecSet<T, { Order::Sorted }> {
+    #[inline(always)]
+    fn from_iter<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+    {
+        let mut v = iter.into_iter().collect::<Vec<_>>();
+
+        v.sort();
+
+        VecSet::<T, { Order::Sorted }> { inner: v }
+    }
+}
+
+impl<T> FromIterator<T> for VecSet<T, { Order::Unsorted }> {
+    #[inline(always)]
+    fn from_iter<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+    {
+        let mut set = VecSet::<T, { Order::Unsorted }>::default();
+
+        for elem in iter {
+            set.push(elem);
+        }
+
+        set
+    }
+}
+
+impl<T, const ORDER: Order> IntoIterator for VecSet<T, { ORDER }> {
+    type Item = T;
+    type IntoIter = IntoIter<T>;
+
+    #[inline(always)]
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.into_iter()
+    }
+}
+
+/// A view into a vacant entry in a `VecSet`. It is part of the [`Entry`] enum.
+pub struct VacantEntry<'a, T, const ORDER: Order> {
+    entry: T,
+    index: usize,
+    set: &'a mut VecSet<T, { ORDER }>,
+}
+
+#[doc(hidden)]
+impl<'a, T, const ORDER: Order> VacantEntry<'a, T, { ORDER }> {
+    /// Inserts the entry into the set.
+    ///
+    /// # Private
+    /// Marked private because it is not known whether
+    /// `ORDER` is `Sorted`, in which case it is disallowed
+    /// to mutate the entry.
+    #[inline(always)]
+    pub(crate) fn insert_priv(self) -> &'a mut T {
+        let index = self.index;
+        let entry = self.entry;
+        self.set.inner.insert(index, entry);
+        &mut self.set.inner[index]
+    }
+}
+
+impl<'a, T, const ORDER: Order> VacantEntry<'a, T, { ORDER }> {
+    /// Returns a reference to the `VacantEntry`'s value.
+    #[inline(always)]
+    pub fn get(&self) -> &T {
+        &self.entry
+    }
+}
+
+impl<'a, T> VacantEntry<'a, T, { Order::Sorted }> {
+    /// Set's the value of the entry with the `VacantEntry`'s value,
+    /// returning a reference to it.
+    #[inline]
+    pub fn insert(self) -> &'a T {
+        self.insert_priv()
+    }
+}
+
+impl<'a, T> VacantEntry<'a, T, { Order::Unsorted }> {
+    /// set's the value of the entry with the `VacantEntry`'s value,
+    /// returning a mutable reference to it.
+    #[inline]
+    pub fn insert(self) -> &'a mut T {
+        self.insert_priv()
+    }
+
+    /// Returns a mutable reference to the `VacantEntry`'s value.
+    #[inline(always)]
+    pub fn get_mut(&mut self) -> &mut T {
+        &mut self.entry
+    }
+}
+
+/// A view into an occupied entry in a `VecSet`. It is part of the [`Entry`] enum.
+pub struct OccupiedEntry<'a, T, const ORDER: Order> {
+    set: &'a mut VecSet<T, { ORDER }>,
+    index: usize,
+}
+
+#[doc(hidden)]
+impl<'a, T, const ORDER: Order> OccupiedEntry<'a, T, { ORDER }> {
+    /// Gets a mutable reference to the entry's occupied entry.
+    ///
+    /// # Private
+    /// Marked private because it is not known whether
+    /// `ORDER` is `Sorted`, in which case it is disallowed
+    /// to mutate the entry.
+    pub(crate) fn get_mut_priv(self) -> &'a mut T {
+        &mut self.set.inner[self.index]
+    }
+}
+
+impl<'a, T, const ORDER: Order> OccupiedEntry<'a, T, { ORDER }> {
+    /// Take ownership of the value from the set
+    #[inline(always)]
+    pub fn remove(self) -> T {
+        self.set.inner.remove(self.index)
+    }
+
+    /// Returns a reference to the `OccupiedEntry`'s value.
+    #[inline(always)]
+    pub fn get(&self) -> &T {
+        &self.set.as_slice()[self.index]
+    }
+}
+
+impl<'a, T> OccupiedEntry<'a, T, { Order::Unsorted }> {
+    /// Returns a mutable reference to the `OccupiedEntry`'s value.
+    #[inline(always)]
+    pub fn get_mut(&mut self) -> &mut T {
+        &mut self.set.as_slice_mut()[self.index]
+    }
+}
+
+/// A view into a single entry in a set, which may either be vacant or occupied.
+/// this enum is constructed from the [`VecSet::entry`] method on a [`VecSet`].
+pub enum Entry<'a, T, const ORDER: Order> {
+    Vacant(VacantEntry<'a, T, { ORDER }>),
+    Occupied(OccupiedEntry<'a, T, { ORDER }>),
+}
+
+impl<'a, T, const ORDER: Order> Entry<'a, T, { ORDER }> {
+    pub(crate) fn insert_priv(self) -> &'a mut T {
+        match self {
+            Entry::Vacant(v) => v.insert_priv(),
+            Entry::Occupied(o) => o.get_mut_priv(),
+        }
+    }
+}
+
+impl<'a, T> Entry<'a, T, { Order::Sorted }> {
+    #[inline(always)]
+    pub fn insert(self) -> &'a T {
+        self.insert_priv()
+    }
+}
+
+impl<'a, T> Entry<'a, T, { Order::Unsorted }> {
+    #[inline(always)]
+    pub fn insert(self) -> &'a mut T {
+        self.insert_priv()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::string::String;
 
     #[test]
     fn test_unsorted() {
@@ -502,7 +587,7 @@ mod tests {
 
     #[test]
     fn test_unsorted_set_entry_insert() {
-        let mut set = VecSet::<_, {Order::Unsorted}>::default();
+        let mut set = VecSet::<_, { Order::Unsorted }>::default();
 
         set.push(10);
         set.push(11);
@@ -525,23 +610,34 @@ mod tests {
 
     #[test]
     fn struct_def_test() {
-        let mut set = (0..10).rev().collect::<VecSet<_, {Order::Sorted}>>();
- 
+        let mut set = (0..10).rev().collect::<VecSet<_, { Order::Sorted }>>();
+
         assert!(set.contains(&9));
-        
+
         match set.entry(15) {
             Entry::Occupied(entry) => {
                 entry.remove();
-            },
+            }
 
             Entry::Vacant(entry) => {
                 entry.insert();
             }
         }
-        
+
         assert!(set.remove(&15));
         assert!(!set.contains(&15));
 
         assert_eq!(set.as_slice(), &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    }
+
+    #[test]
+    fn get_or_insert() {
+        let mut set = (0..10).rev().collect::<VecSet<_, { Order::Sorted }>>();
+
+        let r = set.get_or_insert(11);
+
+        //assert!(set.contains(&10));
+
+        assert!(*r == 11);
     }
 }
