@@ -1,7 +1,4 @@
-use crate::{
-    order::Order,
-    vecset::VecSet
-};
+use crate::{order::Order, vecset::VecSet};
 
 /// A view into a vacant entry in a `VecSet`. It is part of the [`Entry`] enum.
 pub struct VacantEntry<'a, T, const ORDER: Order> {

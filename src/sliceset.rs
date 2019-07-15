@@ -6,7 +6,7 @@ use core::{
     slice::{Iter, IterMut},
 };
 
-pub (crate) type SearchResult = Result<usize, usize>;
+pub(crate) type SearchResult = Result<usize, usize>;
 
 pub(crate) struct SliceSet<T, const ORDER: Order> {
     slice: [T],

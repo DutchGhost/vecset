@@ -1,7 +1,7 @@
 use crate::{
-    sliceset::{SearchResult, SliceSet},
-    entry::{Entry, VacantEntry, OccupiedEntry},
+    entry::{Entry, OccupiedEntry, VacantEntry},
     order::Order,
+    sliceset::{SearchResult, SliceSet},
 };
 
 use core::{
@@ -153,7 +153,6 @@ impl<T, const ORDER: Order> VecSet<T, { ORDER }> {
     pub fn reserv(&mut self, additional: usize) {
         self.inner.reserve(additional);
     }
-    
 
     /// Converts the set into it's backing Vector.
     #[inline(always)]
@@ -384,7 +383,7 @@ impl<T> FromIterator<T> for VecSet<T, { Order::Unordered }> {
     }
 }
 
-impl <'a, T, const ORDER: Order> IntoIterator for &'a VecSet<T, {ORDER}> {
+impl<'a, T, const ORDER: Order> IntoIterator for &'a VecSet<T, { ORDER }> {
     type Item = &'a T;
     type IntoIter = Iter<'a, T>;
 
@@ -393,7 +392,7 @@ impl <'a, T, const ORDER: Order> IntoIterator for &'a VecSet<T, {ORDER}> {
     }
 }
 
-impl <'a, T> IntoIterator for &'a mut VecSet<T, {Order::Unordered}> {
+impl<'a, T> IntoIterator for &'a mut VecSet<T, { Order::Unordered }> {
     type Item = &'a mut T;
     type IntoIter = IterMut<'a, T>;
 
