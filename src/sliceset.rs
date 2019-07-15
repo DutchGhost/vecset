@@ -49,12 +49,12 @@ impl<T, const ORDER: Order> SliceSet<T, { ORDER }> {
     }
 
     #[inline(always)]
-    pub(crate) fn iter(&self) -> Iter<T> {
+    pub(crate) fn iter(&self) -> Iter<'_, T> {
         self.slice.iter()
     }
 
     #[inline(always)]
-    pub(crate) fn iter_mut(&mut self) -> IterMut<T> {
+    pub(crate) fn iter_mut(&mut self) -> IterMut<'_, T> {
         self.slice.iter_mut()
     }
 

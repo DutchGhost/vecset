@@ -135,7 +135,7 @@ impl<T, const ORDER: Order> VecSet<T, { ORDER }> {
 
     /// Returns an iterator over the set.
     #[inline(always)]
-    pub fn iter(&self) -> Iter<T> {
+    pub fn iter(&self) -> Iter<'_, T> {
         self.as_sliceset().iter()
     }
 
@@ -235,7 +235,7 @@ impl<T, const ORDER: Order> VecSet<T, { ORDER }> {
     /// assert_eq!(slice, &[20, 21, 12]);
     /// ```
     #[inline]
-    pub fn entry(&mut self, item: T) -> Entry<T, { ORDER }>
+    pub fn entry(&mut self, item: T) -> Entry<'_, T, { ORDER }>
     where
         T: Ord,
     {
@@ -272,7 +272,7 @@ impl<T, const ORDER: Order> VecSet<T, { ORDER }> {
     /// Note 1: The element range is removed even if the iterator is only partially consumed or not consumed at all.
     /// Note 2: It is unspecified how many elements are removed from the set if the Drain value is leaked.
     #[inline]
-    pub fn drain<R>(&mut self, range: R) -> Drain<T>
+    pub fn drain<R>(&mut self, range: R) -> Drain<'_, T>
     where
         R: RangeBounds<usize>,
     {
@@ -324,7 +324,7 @@ impl<T> VecSet<T, { Order::Unordered }> {
     }
     /// Returns an iterator that allows modifying each value.
     #[inline]
-    pub fn iter_mut(&mut self) -> IterMut<T> {
+    pub fn iter_mut(&mut self) -> IterMut<'_, T> {
         self.as_sliceset_mut().iter_mut()
     }
 }
