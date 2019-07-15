@@ -1,5 +1,5 @@
 use super::order::Order;
-use super::search::{Search, SearchResult};
+//use super::search::{Search, SearchResult};
 
 use core::{
     borrow::Borrow,
@@ -9,6 +9,8 @@ use core::{
 };
 
 use alloc::vec::{Drain, IntoIter, Vec};
+
+use crate::sliceset::{SliceSet, Search, SearchResult};
 
 /// A vecset is a set of items.
 /// It is paremeterized with an [`Order`], to denote whether
@@ -78,18 +80,26 @@ impl<T, const ORDER: Order> VecSet<T, { ORDER }> {
     where
         T: Borrow<Q>,
         Q: Ord,
+        SliceSet<T, {ORDER}>: Search<Q>,
     {
-        // LLVM *should* constify this.
-        match ORDER {
-            Order::Sorted => self.bin_search(item),
-            Order::Unsorted => self.iter_search(item),
-        }
+        // // LLVM *should* constify this.
+        // match ORDER {
+        //     Order::Sorted => self.bin_search(item),
+        //     Order::Unsorted => self.iter_search(item),
+        // }
+        let slice: &[T] = self;
+                //let sset = SliceSet::<T>::from_slice(slice).search(item);
+                //let sset = SliceSet::<_, {Order::Unsorted}>::from_slice(slice);
+        //SliceSet::<T>::from_slice::<{ORDER}>(slice).search(item)
+        //sliceset_from_slice::<T, {Order::Sorted}>(slice).search(item)
+        SliceSet::<T, {ORDER}>::from_slice(slice).search(item)
     }
 
     /// Inserts `item` into the set if not present, then returns a reference to the value in the set.
     pub(crate) fn get_or_insert_priv(&mut self, item: T) -> &mut T
     where
         T: Ord,
+        SliceSet<T, {ORDER}>: Search<T>,
     {
         self.entry(item).insert_priv()
     }
@@ -100,6 +110,7 @@ impl<T, const ORDER: Order> VecSet<T, { ORDER }> {
         T: Borrow<Q>,
         Q: Ord,
         F: FnOnce(&Q) -> T,
+        SliceSet<T, {ORDER}>: Search<Q>,
     {
         self.entry_with(item, f).insert_priv()
     }
@@ -158,6 +169,11 @@ impl<T, const ORDER: Order> VecSet<T, { ORDER }> {
         }
     }
 
+    #[inline]
+    pub fn into_vec(self) -> Vec<T> {
+        self.inner
+    }
+
     /// Returns true if the set contains `item`, false otherwise.
     /// # Examples
     /// ```
@@ -174,6 +190,7 @@ impl<T, const ORDER: Order> VecSet<T, { ORDER }> {
     where
         T: Borrow<Q>,
         Q: Ord,
+        SliceSet<T, {ORDER}>: Search<Q>
     {
         self.search(item).is_ok()
     }
@@ -208,6 +225,7 @@ impl<T, const ORDER: Order> VecSet<T, { ORDER }> {
     pub fn entry(&mut self, item: T) -> Entry<T, { ORDER }>
     where
         T: Ord,
+        SliceSet<T, {ORDER}>: Search<T>,
     {
         match self.search(&item) {
             Ok(idx) => Entry::Occupied(OccupiedEntry::<T, { ORDER }> {
@@ -228,6 +246,7 @@ impl<T, const ORDER: Order> VecSet<T, { ORDER }> {
         T: Borrow<Q>,
         Q: Ord,
         F: FnOnce(&Q) -> T,
+        SliceSet<T, {ORDER}>: Search<Q>,
     {
         match self.search(item) {
             Ok(idx) => Entry::Occupied(OccupiedEntry::<T, { ORDER }> {
@@ -249,6 +268,7 @@ impl<T, const ORDER: Order> VecSet<T, { ORDER }> {
     where
         T: Borrow<Q>,
         Q: Ord,
+        SliceSet<T, {ORDER}>: Search<Q>,
     {
         match self.search(item) {
             Ok(idx) => {
@@ -282,18 +302,6 @@ impl<T, const ORDER: Order> VecSet<T, { ORDER }> {
 }
 
 impl<T: Ord> VecSet<T, { Order::Sorted }> {
-    /// Gets access to the underlying Vec for the scope of the closure.
-    /// The order and unique item guarantee do not apply within the closure,
-    /// but are restored after the closure.
-    pub fn mutate_in_place<F>(&mut self, mut f: F)
-    where
-        F: FnMut(&mut Vec<T>),
-    {
-        f(&mut self.inner);
-        self.inner.dedup();
-        self.inner.sort();
-    }
-
     /// Inserts `item` into the set if not present, then returns a reference to the value in the set.
     pub fn get_or_insert(&mut self, item: T) -> &T {
         self.get_or_insert_priv(item)
